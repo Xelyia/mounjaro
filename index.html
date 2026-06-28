@@ -253,6 +253,15 @@ function App() {
           </div>
 
           {!tooSmall && (
+            <div style={s.syringe}>
+              <span style={s.syringeLab}>Seringue à insuline (U-100)</span>
+              <span style={s.syringeVal}>
+                {clicks} unités · {fr(ml, 2)} ml
+              </span>
+            </div>
+          )}
+
+          {!tooSmall && (
             <div
               style={{
                 ...s.ecart,
@@ -878,6 +887,25 @@ const s = {
     fontVariantNumeric: "tabular-nums",
   },
   readCellK: { fontSize: 11, color: "rgba(255,255,255,.55)", marginTop: 3 },
+  syringe: {
+    marginTop: 14,
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 10,
+    border: "1px solid rgba(212,162,76,.45)",
+    background: "rgba(212,162,76,.12)",
+    borderRadius: 10,
+    padding: "9px 12px",
+  },
+  syringeLab: { fontSize: 11.5, color: "rgba(255,255,255,.7)", fontWeight: 500 },
+  syringeVal: {
+    fontFamily: "ui-monospace, 'SF Mono', Menlo, monospace",
+    fontSize: 15,
+    fontWeight: 700,
+    color: C.gold,
+    fontVariantNumeric: "tabular-nums",
+  },
   ecart: {
     marginTop: 14,
     fontSize: 13,
