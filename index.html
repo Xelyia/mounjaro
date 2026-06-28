@@ -5,15 +5,15 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
 <title>Calculateur Mounjaro · clics & ml</title>
 <meta name="description" content="Calculateur de clics et ml par injection pour stylos Mounjaro KwikPen — outil pédagogique indépendant." />
-<script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
-<script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
-<script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
-<style>html,body{margin:0;padding:0;background:#E9ECF1}</style>
+<script src="https://unpkg.com/react@18.3.1/umd/react.production.min.js" crossorigin></script>
+<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.production.min.js" crossorigin></script>
+<script src="https://unpkg.com/@babel/standalone@7/babel.min.js"></script>
+<style>html,body{margin:0;padding:0;background:#E9ECF1}#root{min-height:100vh}.boot{padding:24px;font:15px system-ui;color:#6A7280}</style>
 </head>
 <body>
-<div id="root"></div>
+<div id="root"><div class="boot">Chargement du calculateur…</div></div>
 <noscript>Cette application nécessite l'activation de JavaScript.</noscript>
-<script type="text/babel" data-presets="react">
+<script type="text/plain" id="src">
 const { useState } = React;
 
 // ── Données officielles (EMA / SmPC / Lilly) ─────────────────────────────
@@ -1068,6 +1068,24 @@ const css = `
 `;
 
 ReactDOM.createRoot(document.getElementById("root")).render(<App />);
+</script>
+<script>
+(function () {
+  function show(msg) {
+    document.getElementById("root").innerHTML =
+      '<pre style="white-space:pre-wrap;padding:20px;margin:0;color:#a11;font:13px ui-monospace,monospace">' +
+      String(msg) + "</pre>";
+  }
+  try {
+    if (!window.Babel) { show("Babel n'a pas pu se charger (connexion ?). Recharge la page."); return; }
+    var src = document.getElementById("src").textContent;
+    var out = Babel.transform(src, { presets: [["react", { runtime: "classic" }]] }).code;
+    (0, eval)(out);
+  } catch (e) {
+    show("Erreur : " + (e && e.message ? e.message : e));
+    console.error(e);
+  }
+})();
 </script>
 </body>
 </html>
