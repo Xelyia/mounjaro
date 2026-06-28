@@ -1,0 +1,1073 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>Calculateur Mounjaro · clics & ml</title>
+<meta name="description" content="Calculateur de clics et ml par injection pour stylos Mounjaro KwikPen — outil pédagogique indépendant." />
+<script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
+<script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
+<script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+<style>html,body{margin:0;padding:0;background:#E9ECF1}</style>
+</head>
+<body>
+<div id="root"></div>
+<noscript>Cette application nécessite l'activation de JavaScript.</noscript>
+<script type="text/babel" data-presets="react">
+const { useState } = React;
+
+// ── Données officielles (EMA / SmPC / Lilly) ─────────────────────────────
+// KwikPen multidose : 0,6 ml par dose pleine · 4 doses par stylo
+// 60 clics = 1 dose pleine  →  1 clic = 0,01 ml
+// mg par clic = force du stylo ÷ 60
+const PENS = [2.5, 5, 7.5, 10, 12.5, 15];
+const CLICKS_FULL = 60;      // clics pour une dose pleine
+const ML_FULL = 0.6;         // ml pour une dose pleine
+const ML_PER_CLICK = ML_FULL / CLICKS_FULL; // 0,01 ml
+const DOSES_PER_PEN = 4;
+const TOTAL_CLICKS = CLICKS_FULL * DOSES_PER_PEN; // 240 clics garantis (4 doses)
+const USABLE_ML = ML_FULL * DOSES_PER_PEN; // 2,4 ml = 4 doses
+
+// Modèles de stylo (volumes totaux d'après monj.co.uk / données MHRA)
+const MODELS = {
+  old: { key: "old", name: "Ancien modèle", tag: "avec golden dose", totalMl: 3.2 },
+  new: { key: "new", name: "Nouveau modèle", tag: "sans golden dose", totalMl: 2.6 },
+};
+
+// Palette « instrument de précision »
+const C = {
+  bg: "#E9ECF1",
+  card: "#FFFFFF",
+  ink: "#16181D",
+  sub: "#6A7280",
+  line: "#E2E6EC",
+  graphite: "#14161B",
+  gold: "#D4A24C",
+  indigo: "#5856D6",
+  ok: "#1E9E6A",
+  warn: "#C77A0E",
+  danger: "#C0392B",
+};
+
+const fr = (n, d = 2) =>
+  Number(n).toLocaleString("fr-FR", { minimumFractionDigits: d, maximumFractionDigits: d });
+const round2 = (n) => Math.round(n * 100) / 100;
+const clamp = (n, lo, hi) => Math.min(hi, Math.max(lo, n));
+
+const MICRO = [0.5, 1, 1.5, 2];
+const INTERVALS = [2, 3, 3.5, 4, 5, 6, 7, 10, 14];
+const STD_WEEKLY = [2.5, 5, 7.5, 10, 12.5, 15];
+
+function App() {
+  const [penMg, setPenMg] = useState(15);
+  const [model, setModel] = useState("new");
+  const [dose, setDose] = useState(4.25);
+  const [doseText, setDoseText] = useState("4,25");
+  const [interval, setIntervalDays] = useState(4);
+  const [intervalText, setIntervalText] = useState("4");
+  const [price, setPrice] = useState("");
+  const [goldUnits, setGoldUnits] = useState("");
+
+  const strength = penMg;
+  const mgPerClick = strength / CLICKS_FULL;
+  const conc = strength / ML_FULL;
+
+  const exactClicks = dose / mgPerClick;
+  const clicks = Math.round(exactClicks);
+  const ml = clicks * ML_PER_CLICK;
+  const actual = clicks * mgPerClick;
+  const ecart = actual - dose;
+  const exactMl = dose / conc;
+
+  const overCap = clicks > CLICKS_FULL;
+  const tooSmall = clicks < 1;
+  const injPerPen = clicks > 0 ? Math.floor(TOTAL_CLICKS / clicks) : 0;
+
+  const costNum = parseFloat(String(price).replace(",", "."));
+  const costPerInj =
+    price !== "" && !isNaN(costNum) && clicks > 0 ? (costNum * clicks) / TOTAL_CLICKS : null;
+
+  // Modèle de stylo : reliquat après les 4 doses (« golden dose »)
+  const mdl = MODELS[model];
+  const leftoverMl = round2(mdl.totalMl - USABLE_ML); // 0,8 (ancien) / 0,2 (nouveau)
+  const goldenClicks = Math.max(0, Math.round(leftoverMl / ML_PER_CLICK)); // ~80 / ~20 (variable, non garanti)
+  const goldenInj = model === "old" && clicks > 0 ? Math.floor(goldenClicks / clicks) : 0;
+  const guNum = parseFloat(String(goldUnits).replace(",", "."));
+  const goldUnitsNum = goldUnits !== "" && !isNaN(guNum) && guNum >= 0 ? guNum : null;
+
+  // Équivalence selon l'intervalle entre 2 injections
+  const weeklyEq = (actual * 7) / interval;
+  const dailyAvg = actual / interval;
+  const injPerWeek = 7 / interval;
+  const penDays = clicks > 0 ? injPerPen * interval : 0;
+  const costPerWeek = costPerInj != null ? (costPerInj * 7) / interval : null;
+  const nearestStd = STD_WEEKLY.reduce((a, b) =>
+    Math.abs(b - weeklyEq) < Math.abs(a - weeklyEq) ? b : a
+  );
+  const stdDelta = weeklyEq - nearestStd;
+
+  const setDoseAll = (v) => {
+    const x = round2(clamp(v, 0.25, 15));
+    setDose(x);
+    setDoseText(fr(x));
+  };
+  const onText = (raw) => {
+    setDoseText(raw);
+    const parsed = parseFloat(raw.replace(",", "."));
+    if (!isNaN(parsed)) setDose(round2(clamp(parsed, 0.25, 15)));
+  };
+
+  const setIntAll = (v) => {
+    const x = round2(clamp(v, 1, 14));
+    setIntervalDays(x);
+    setIntervalText(fr(x, x % 1 ? 1 : 0));
+  };
+  const onIntText = (raw) => {
+    setIntervalText(raw);
+    const parsed = parseFloat(raw.replace(",", "."));
+    if (!isNaN(parsed)) setIntervalDays(round2(clamp(parsed, 1, 14)));
+  };
+
+  const tableDoses = [0.5, 1, 1.5, 2, 2.5, 5, 7.5, 10, 12.5, 15];
+
+  return (
+    <div style={s.page}>
+      <style>{css}</style>
+      <div style={s.wrap}>
+        {/* En-tête */}
+        <header style={s.header}>
+          <div style={s.eyebrow}>MOUNJARO · KWIKPEN MULTIDOSE</div>
+          <h1 style={s.h1}>Calculateur de clics & ml</h1>
+          <p style={s.lede}>
+            Choisis ton stylo, règle la dose voulue (précision&nbsp;0,05&nbsp;mg) et lis
+            directement le nombre de clics et les ml à injecter.
+          </p>
+          <div style={s.formula}>
+            Modèle de clic proportionnel : <b>(dose ÷ puissance du stylo) × 60 = clics</b> ·
+            1&nbsp;clic ≈ 0,01&nbsp;ml. Outil pédagogique indépendant, qui ne remplace pas
+            l’ordonnance ni la notice.
+          </div>
+        </header>
+
+        {/* Sélecteur de stylo */}
+        <section style={s.card}>
+          <div style={s.label}>Stylo utilisé · mg par dose pleine</div>
+          <div style={s.penGrid}>
+            {PENS.map((p) => {
+              const on = p === penMg;
+              return (
+                <button
+                  key={p}
+                  onClick={() => setPenMg(p)}
+                  className="penBtn"
+                  style={{
+                    ...s.penBtn,
+                    background: on ? C.indigo : "#fff",
+                    color: on ? "#fff" : C.ink,
+                    borderColor: on ? C.indigo : C.line,
+                    boxShadow: on ? "0 4px 14px rgba(88,86,214,.28)" : "none",
+                  }}
+                >
+                  <span style={{ fontSize: 17, fontWeight: 700 }}>{fr(p, p % 1 ? 1 : 0)}</span>
+                  <span style={{ fontSize: 10, opacity: 0.75 }}>mg</span>
+                </button>
+              );
+            })}
+          </div>
+          <div style={s.penFacts}>
+            <Fact k="1 clic" v={`${fr(mgPerClick, 4)} mg · 0,01 ml`} />
+            <Fact k="Dose pleine" v={`60 clics · ${fr(ML_FULL, 1)} ml`} />
+            <Fact k="Concentration" v={`${fr(conc, 2)} mg/ml`} />
+          </div>
+        </section>
+
+        {/* Modèle de stylo : ancien (golden dose) vs nouveau */}
+        <section style={s.card}>
+          <div style={s.label}>Modèle de stylo</div>
+          <div style={s.modelRow}>
+            {Object.values(MODELS).map((m) => {
+              const on = m.key === model;
+              return (
+                <button
+                  key={m.key}
+                  onClick={() => setModel(m.key)}
+                  className="penBtn"
+                  style={{
+                    ...s.modelBtn,
+                    background: on ? C.graphite : "#fff",
+                    color: on ? "#fff" : C.ink,
+                    borderColor: on ? C.graphite : C.line,
+                  }}
+                >
+                  <span style={{ fontSize: 14, fontWeight: 700 }}>{m.name}</span>
+                  <span style={{ fontSize: 11, opacity: 0.7 }}>{m.tag}</span>
+                </button>
+              );
+            })}
+          </div>
+          <div style={s.penFacts}>
+            <Fact k="Liquide total" v={`${fr(mdl.totalMl, 1)} ml`} />
+            <Fact k="4 doses utiles" v={`${fr(USABLE_ML, 1)} ml · 240 clics`} />
+            <Fact
+              k={model === "old" ? "Reliquat (golden dose)" : "Reliquat"}
+              v={`≈ ${fr(leftoverMl, 1)} ml`}
+            />
+          </div>
+          {model === "old" ? (
+            <div style={s.modelNote}>
+              Ce modèle laisse ~{fr(leftoverMl, 1)} ml après les 4 doses (≈ {goldenClicks} clics).
+              Ce reliquat est <b>variable</b> : à mesurer à la seringue (voir section golden dose).
+            </div>
+          ) : (
+            <div style={s.modelNote}>
+              Modèle redéployé au Royaume-Uni depuis avril 2026 : plunger rallongé, reliquat réduit,
+              plus de « golden dose ». Pendant la transition, les deux versions circulent.
+            </div>
+          )}
+          <p style={s.note}>
+            Les volumes 3,2 / 2,6 ml sont un <b>modèle explicatif</b> (d’après Monj), pas une donnée
+            du fabricant. L’information officielle indique <b>4 doses administrées de 0,6 ml</b> par
+            stylo ; toute solution restante doit en principe être jetée.
+          </p>
+        </section>
+
+        {/* Lecteur principal (hero) */}
+        <section style={s.readout}>
+          <div style={s.readGlow} />
+          <div style={s.readLabel}>CLICS À COMPTER</div>
+          <div style={s.bigNum}>
+            {tooSmall ? "—" : clicks}
+            <span style={s.bigUnit}>{tooSmall ? "" : " clics"}</span>
+          </div>
+
+          <div style={s.readRow}>
+            <div style={s.readCell}>
+              <div style={s.readCellV}>{tooSmall ? "—" : fr(ml, 2)}</div>
+              <div style={s.readCellK}>ml injectés</div>
+            </div>
+            <div style={s.readSep} />
+            <div style={s.readCell}>
+              <div style={s.readCellV}>{tooSmall ? "—" : fr(actual, 3)}</div>
+              <div style={s.readCellK}>mg réels délivrés</div>
+            </div>
+          </div>
+
+          {!tooSmall && (
+            <div
+              style={{
+                ...s.ecart,
+                color:
+                  Math.abs(ecart) < 0.001 ? C.ok : Math.abs(ecart) <= 0.13 ? C.gold : C.warn,
+                borderColor:
+                  Math.abs(ecart) < 0.001
+                    ? "rgba(30,158,106,.5)"
+                    : "rgba(212,162,76,.5)",
+              }}
+            >
+              {Math.abs(ecart) < 0.001
+                ? "Dose atteinte exactement"
+                : `Écart vs cible : ${ecart > 0 ? "+" : "−"}${fr(Math.abs(ecart), 3)} mg`}
+              <span style={s.ecartSub}>
+                {" "}
+                · clics théoriques {fr(exactClicks, 2)}
+              </span>
+            </div>
+          )}
+
+          {overCap && (
+            <div style={s.alert}>
+              ⚠︎ {clicks} clics dépassent une dose pleine (60). Impossible en une seule
+              injection avec un stylo {fr(strength, strength % 1 ? 1 : 0)} mg.
+            </div>
+          )}
+          {tooSmall && (
+            <div style={s.alert}>Dose trop faible pour ce stylo (moins d’un clic).</div>
+          )}
+        </section>
+
+        {/* Curseur de dose */}
+        <section style={s.card}>
+          <div style={s.doseHead}>
+            <div style={s.label}>Dose voulue</div>
+            <div style={s.stepper}>
+              <button className="stepBtn" style={s.stepBtn} onClick={() => setDoseAll(dose - 0.05)}>
+                −
+              </button>
+              <input
+                className="doseInput"
+                style={s.doseInput}
+                value={doseText}
+                inputMode="decimal"
+                onChange={(e) => onText(e.target.value)}
+                onBlur={() => setDoseText(fr(dose))}
+              />
+              <span style={s.mgTag}>mg</span>
+              <button className="stepBtn" style={s.stepBtn} onClick={() => setDoseAll(dose + 0.05)}>
+                +
+              </button>
+            </div>
+          </div>
+
+          <input
+            type="range"
+            className="slider"
+            min={0.25}
+            max={15}
+            step={0.05}
+            value={dose}
+            style={{ "--f": ((dose - 0.25) / (15 - 0.25)) * 100 + "%" }}
+            onChange={(e) => setDoseAll(parseFloat(e.target.value))}
+          />
+          <div style={s.ticks}>
+            {[0.25, 2.5, 5, 7.5, 10, 12.5, 15].map((t) => (
+              <span key={t}>{fr(t, t % 1 ? 2 : 0)}</span>
+            ))}
+          </div>
+
+          <div style={s.presetRow}>
+            {MICRO.map((d) => (
+              <Chip key={d} on={dose === d} onClick={() => setDoseAll(d)}>
+                {fr(d, 1)}
+              </Chip>
+            ))}
+            <span style={s.presetDiv} />
+            {PENS.map((d) => (
+              <Chip key={"p" + d} on={dose === d} onClick={() => setDoseAll(d)}>
+                {fr(d, d % 1 ? 1 : 0)}
+              </Chip>
+            ))}
+          </div>
+        </section>
+
+        {/* Intervalle entre injections + équivalence 7 jours */}
+        <section style={s.card}>
+          <div style={s.doseHead}>
+            <div style={s.label}>Intervalle entre 2 injections</div>
+            <div style={s.stepper}>
+              <button className="stepBtn" style={s.stepBtn} onClick={() => setIntAll(interval - 0.5)}>
+                −
+              </button>
+              <input
+                className="doseInput"
+                style={s.doseInput}
+                value={intervalText}
+                inputMode="decimal"
+                onChange={(e) => onIntText(e.target.value)}
+                onBlur={() => setIntervalText(fr(interval, interval % 1 ? 1 : 0))}
+              />
+              <span style={s.mgTag}>jours</span>
+              <button className="stepBtn" style={s.stepBtn} onClick={() => setIntAll(interval + 0.5)}>
+                +
+              </button>
+            </div>
+          </div>
+
+          <div style={s.presetRow}>
+            {INTERVALS.map((d) => (
+              <Chip key={d} on={interval === d} onClick={() => setIntAll(d)}>
+                {fr(d, d % 1 ? 1 : 0)} j
+              </Chip>
+            ))}
+          </div>
+
+          {/* Équivalence sur 7 jours */}
+          <div style={s.equiv}>
+            <div style={s.equivTop}>SUR 7 JOURS · ÉQUIVALENT HEBDOMADAIRE</div>
+            <div style={s.equivBig}>
+              {fr(weeklyEq, 2)}
+              <span style={s.equivUnit}> mg / semaine</span>
+            </div>
+            <div style={s.equivRow}>
+              <span>
+                <b>{fr(actual, 2)} mg</b> tous les {fr(interval, interval % 1 ? 1 : 0)} j
+              </span>
+              <span style={s.equivDot}>·</span>
+              <span>{fr(dailyAvg, 3)} mg / jour</span>
+              <span style={s.equivDot}>·</span>
+              <span>{fr(injPerWeek, 2)} inj. / sem.</span>
+            </div>
+            <div style={s.equivNote}>
+              Proche du palier hebdomadaire de{" "}
+              <b>{fr(nearestStd, nearestStd % 1 ? 1 : 0)} mg</b>
+              {Math.abs(stdDelta) >= 0.005
+                ? ` (${stdDelta > 0 ? "+" : "−"}${fr(Math.abs(stdDelta), 2)} mg)`
+                : " (exact)"}
+            </div>
+          </div>
+        </section>
+
+        {/* Rendement du stylo + coût */}
+        <section style={s.card}>
+          <div style={s.label}>Rendement du stylo</div>
+          <div style={s.yieldRow}>
+            <Fact k="Injections / stylo" v={tooSmall ? "—" : `${injPerPen}`} big />
+            <Fact k="Durée du stylo" v={tooSmall ? "—" : `${fr(penDays, penDays % 1 ? 1 : 0)} j`} />
+            <Fact k="Base" v="4 doses · 240 clics" />
+          </div>
+          {model === "old" && goldenInj > 0 && !tooSmall && (
+            <div style={s.goldNote}>
+              + reliquat « golden dose » : ~{goldenClicks} clics, soit jusqu’à{" "}
+              <b>{goldenInj} injection{goldenInj > 1 ? "s" : ""}</b> en plus — quantité variable, à{" "}
+              <b>mesurer à la seringue</b> (voir section golden dose).
+            </div>
+          )}
+          <div style={s.costRow}>
+            <span style={s.costLabel}>Prix du stylo (optionnel)</span>
+            <input
+              className="doseInput"
+              style={{ ...s.doseInput, width: 78 }}
+              value={price}
+              inputMode="decimal"
+              placeholder="€"
+              onChange={(e) => setPrice(e.target.value)}
+            />
+            {costPerInj != null && (
+              <span style={s.costOut}>
+                ≈ <b>{fr(costPerInj, 2)} €</b> / injection · <b>{fr(costPerWeek, 2)} €</b> / sem.
+              </span>
+            )}
+          </div>
+        </section>
+
+        {/* Conversions courantes (fractions de dose) */}
+        <section style={s.card}>
+          <div style={s.label}>Conversions de clics courantes</div>
+          <div style={s.fracRow}>
+            {[
+              ["Dose pleine", "100 %", 60],
+              ["Trois quarts", "75 %", 45],
+              ["Demi-dose", "50 %", 30],
+              ["Quart", "25 %", 15],
+            ].map(([name, pct, c]) => (
+              <div key={c} style={s.fracCell}>
+                <div style={s.fracClicks}>{c}</div>
+                <div style={s.fracClicksLab}>clics</div>
+                <div style={s.fracMl}>≈ {fr(c * ML_PER_CLICK, 2)} ml</div>
+                <div style={s.fracName}>
+                  {name} · {pct}
+                </div>
+              </div>
+            ))}
+          </div>
+        </section>
+
+        {/* Tableau de référence */}
+        <section style={s.card}>
+          <div style={s.label}>
+            Référence · stylo {fr(strength, strength % 1 ? 1 : 0)} mg
+          </div>
+          <div style={s.table}>
+            <div style={{ ...s.trow, ...s.thead }}>
+              <span>Dose</span>
+              <span>Clics</span>
+              <span>ml</span>
+            </div>
+            {tableDoses.map((d) => {
+              const c = Math.round(d / mgPerClick);
+              const over = c > CLICKS_FULL;
+              return (
+                <div
+                  key={d}
+                  style={{
+                    ...s.trow,
+                    background: round2(d) === dose ? "rgba(88,86,214,.07)" : "transparent",
+                  }}
+                >
+                  <span style={{ fontWeight: 600 }}>{fr(d, d % 1 ? 1 : 0)} mg</span>
+                  <span style={{ color: over ? C.sub : C.ink }}>{over ? "—" : c}</span>
+                  <span style={{ color: over ? C.sub : C.ink }}>
+                    {over ? "—" : fr(c * ML_PER_CLICK, 2)}
+                  </span>
+                </div>
+              );
+            })}
+          </div>
+          <p style={s.note}>« — » = dose supérieure à une dose pleine (impossible en une injection).</p>
+        </section>
+
+        {/* Recommandations */}
+        <Section title="Comment fonctionnent les clics" sub="Recommandations d’usage" defaultOpen={false}>
+          <ul style={s.ul}>
+            <li style={s.li}>
+              <b>Modèle proportionnel :</b> clics = (dose ÷ puissance du stylo) × 60. Le calculateur
+              l’automatise et affiche le volume (1 clic ≈ 0,01 ml).
+            </li>
+            <li style={s.li}>
+              <b>60 clics = 1 dose pleine = 0,6 ml.</b> Chaque clic pousse 0,01 ml, quel que soit le
+              stylo.
+            </li>
+            <li style={s.li}>
+              <b>Un clic ne vaut pas la même dose selon le stylo.</b> Le liquide est plus concentré
+              en montant en gamme : 1 clic d’un stylo 15 mg délivre 0,25 mg, soit <b>6×</b> un clic
+              d’un stylo 2,5 mg (0,0417 mg).
+            </li>
+            <li style={s.li}>
+              <b>Une seule purge à la première utilisation du stylo</b> : amorce une fois (chasse
+              l’air, débit fiable), puis pour les doses fractionnées tu comptes directement les clics
+              — inutile de re-purger à chaque injection, cela gaspillerait du liquide et fausserait le
+              compte.
+            </li>
+            <li style={s.li}>
+              Tourne le sélecteur <b>lentement</b>, compte chaque clic et vérifie le total avant
+              d’injecter. <b>Aiguille neuve</b> à chaque fois.
+            </li>
+            <li style={s.li}>
+              La <b>couleur de la boîte</b> est la vérification officielle de la force du stylo — les
+              clics ne sont qu’un repère sonore.
+            </li>
+            <li style={s.li}>Un stylo = un seul patient. Ne jamais le partager.</li>
+          </ul>
+        </Section>
+
+        {/* Golden dose à la seringue */}
+        <Section
+          title="Golden dose · la mesurer à la seringue"
+          sub="Prélever le reliquat avec précision"
+          defaultOpen={false}
+          gold
+        >
+          <ul style={s.ul}>
+            <li style={s.li}>
+              Le « golden dose » est le <b>liquide restant après les 4 doses</b>. Sa quantité{" "}
+              <b>varie d’un stylo à l’autre</b> — c’est pourquoi il faut la <b>mesurer</b> plutôt que
+              de la deviner.
+            </li>
+            <li style={s.li}>
+              Pour l’injecter précisément, prélève le reliquat dans une{" "}
+              <b>seringue à insuline U-100</b> (100 unités = 1 ml). Tu lis alors le volume exact, donc
+              la dose exacte.
+            </li>
+            <li style={s.li}>
+              Équivalence clé : <b>1 unité d’insuline = 0,01 ml = 1 clic</b>. Le nombre d’unités
+              affiché sur la seringue correspond donc directement aux clics.
+            </li>
+            <li style={s.li}>
+              Dose réelle = <b>unités × (force du stylo ÷ 60)</b>. Avec ton stylo {fr(strength, strength % 1 ? 1 : 0)} mg :{" "}
+              <b>1 unité = {fr(mgPerClick, 4)} mg</b>.
+            </li>
+            <li style={s.li}>
+              Pratique : seringue + aiguille <b>stériles neuves</b>, désinfecte le bouchon avant de
+              piquer, et <b>remesure à chaque fois</b> (le reliquat n’est pas constant).
+            </li>
+          </ul>
+
+          {/* Convertisseur unités → dose */}
+          <div style={s.goldCalc}>
+            <div style={s.goldCalcLabel}>Convertisseur seringue</div>
+            <div style={s.goldCalcRow}>
+              <input
+                className="doseInput"
+                style={{ ...s.doseInput, width: 70 }}
+                value={goldUnits}
+                inputMode="decimal"
+                placeholder="unités"
+                onChange={(e) => setGoldUnits(e.target.value)}
+              />
+              <span style={s.mgTag}>unités prélevées</span>
+            </div>
+            {goldUnitsNum != null && (
+              <div style={s.goldCalcOut}>
+                = <b>{fr(goldUnitsNum * mgPerClick, 3)} mg</b> · {fr(goldUnitsNum * ML_PER_CLICK, 2)} ml
+                {model === "new" && goldUnitsNum > goldenClicks + 0.5 && (
+                  <div style={s.goldCalcWarn}>
+                    Plus que le reliquat estimé du nouveau modèle (~{goldenClicks} unités) : vérifie ce
+                    qui reste réellement dans le stylo.
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        </Section>
+
+        {/* Sécurité & sources France */}
+        <Section title="Sécurité & sources · France" sub="Liens officiels" defaultOpen={false} warn>
+          <ul style={s.ul}>
+            <li style={s.li}>
+              Mounjaro (tirzépatide) est un <b>médicament sur ordonnance</b>. Cet outil est{" "}
+              <b>pédagogique et indépendant</b> : il ne remplace ni l’ordonnance, ni la notice, ni le
+              mode d’emploi du KwikPen.
+            </li>
+            <li style={s.li}>
+              <b>Ne modifie pas ta posologie</b> sans l’avis de ton médecin ou pharmacien.
+            </li>
+            <li style={s.li}>
+              En cas d’effet indésirable suspecté, <b>signale-le</b> (acte utile à tous).
+            </li>
+          </ul>
+          <div style={s.links}>
+            <a style={s.link} href="https://signalement.social-sante.gouv.fr" target="_blank" rel="noreferrer">
+              Signaler un effet indésirable → signalement.social-sante.gouv.fr
+            </a>
+            <a style={s.link} href="https://ansm.sante.fr" target="_blank" rel="noreferrer">
+              ANSM (sécurité du médicament) → ansm.sante.fr
+            </a>
+            <a
+              style={s.link}
+              href="https://base-donnees-publique.medicaments.gouv.fr"
+              target="_blank"
+              rel="noreferrer"
+            >
+              Notice & RCP officiels → base-donnees-publique.medicaments.gouv.fr
+            </a>
+          </div>
+        </Section>
+
+        <footer style={s.footer}>
+          Les clics sont des crans entiers : le nombre affiché est arrondi, d’où l’écart possible
+          avec la cible. Modèle de clic proportionnel à visée pédagogique — suis la posologie validée
+          avec ton médecin.
+        </footer>
+      </div>
+    </div>
+  );
+}
+
+function Fact({ k, v, big }) {
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 3 }}>
+      <span style={{ fontSize: 11, color: C.sub, letterSpacing: 0.2 }}>{k}</span>
+      <span
+        style={{
+          fontFamily: "ui-monospace, 'SF Mono', Menlo, monospace",
+          fontSize: big ? 22 : 14,
+          fontWeight: big ? 700 : 600,
+          color: C.ink,
+        }}
+      >
+        {v}
+      </span>
+    </div>
+  );
+}
+
+function Chip({ children, on, onClick }) {
+  return (
+    <button
+      className="chip"
+      onClick={onClick}
+      style={{
+        ...chipBase,
+        background: on ? C.graphite : "#fff",
+        color: on ? "#fff" : C.ink,
+        borderColor: on ? C.graphite : C.line,
+      }}
+    >
+      {children}
+    </button>
+  );
+}
+
+function Section({ title, sub, children, defaultOpen, warn, gold }) {
+  const [open, setOpen] = useState(!!defaultOpen);
+  const dot = gold ? C.gold : warn ? C.warn : C.indigo;
+  return (
+    <section style={{ ...s.card, padding: 0, overflow: "hidden" }}>
+      <button className="accBtn" onClick={() => setOpen(!open)} style={s.accHead}>
+        <span style={{ display: "flex", alignItems: "center", gap: 9 }}>
+          <span
+            style={{
+              width: 7,
+              height: 7,
+              borderRadius: 9,
+              background: dot,
+              flex: "0 0 auto",
+            }}
+          />
+          <span>
+            <span style={s.accTitle}>{title}</span>
+            {sub && <span style={s.accSub}>{sub}</span>}
+          </span>
+        </span>
+        <span style={{ ...s.accChev, transform: open ? "rotate(180deg)" : "none" }}>⌄</span>
+      </button>
+      {open && <div style={s.accBody}>{children}</div>}
+    </section>
+  );
+}
+
+const chipBase = {
+  border: "1px solid",
+  borderRadius: 999,
+  padding: "6px 11px",
+  fontSize: 13,
+  fontWeight: 600,
+  cursor: "pointer",
+  fontVariantNumeric: "tabular-nums",
+};
+
+const s = {
+  page: {
+    minHeight: "100vh",
+    background: C.bg,
+    padding: "20px 14px 40px",
+    fontFamily: "system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif",
+    color: C.ink,
+    WebkitFontSmoothing: "antialiased",
+  },
+  wrap: { maxWidth: 520, margin: "0 auto", display: "flex", flexDirection: "column", gap: 14 },
+  header: { padding: "4px 4px 2px" },
+  eyebrow: {
+    fontSize: 11,
+    letterSpacing: 1.6,
+    color: C.indigo,
+    fontWeight: 700,
+  },
+  h1: { fontSize: 26, lineHeight: 1.1, margin: "8px 0 6px", letterSpacing: -0.5, fontWeight: 800 },
+  lede: { fontSize: 13.5, color: C.sub, lineHeight: 1.5, margin: 0 },
+  formula: {
+    marginTop: 11,
+    fontSize: 12,
+    lineHeight: 1.5,
+    color: C.ink,
+    background: "#fff",
+    border: `1px solid ${C.line}`,
+    borderRadius: 10,
+    padding: "9px 11px",
+  },
+
+  card: {
+    background: C.card,
+    borderRadius: 18,
+    padding: 16,
+    border: `1px solid ${C.line}`,
+    boxShadow: "0 1px 2px rgba(16,24,40,.04)",
+  },
+  label: { fontSize: 12, fontWeight: 700, letterSpacing: 0.4, color: C.sub, marginBottom: 12, textTransform: "uppercase" },
+
+  penGrid: { display: "grid", gridTemplateColumns: "repeat(6,1fr)", gap: 7 },
+  penBtn: {
+    border: "1px solid",
+    borderRadius: 12,
+    padding: "10px 2px 8px",
+    display: "flex",
+    flexDirection: "column",
+    alignItems: "center",
+    gap: 1,
+    cursor: "pointer",
+    transition: "all .15s ease",
+  },
+  penFacts: {
+    display: "flex",
+    justifyContent: "space-between",
+    gap: 8,
+    marginTop: 14,
+    paddingTop: 13,
+    borderTop: `1px solid ${C.line}`,
+  },
+
+  modelRow: { display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 },
+  modelBtn: {
+    border: "1px solid",
+    borderRadius: 12,
+    padding: "11px 8px",
+    display: "flex",
+    flexDirection: "column",
+    alignItems: "center",
+    gap: 2,
+    cursor: "pointer",
+    transition: "all .15s ease",
+    textAlign: "center",
+  },
+  modelNote: {
+    marginTop: 13,
+    fontSize: 12,
+    lineHeight: 1.5,
+    color: C.sub,
+    background: "#F6F7FA",
+    border: `1px solid ${C.line}`,
+    borderRadius: 10,
+    padding: "9px 11px",
+  },
+  goldNote: {
+    marginTop: 12,
+    fontSize: 12,
+    lineHeight: 1.5,
+    color: "#7A5A12",
+    background: "rgba(212,162,76,.13)",
+    border: "1px solid rgba(212,162,76,.4)",
+    borderRadius: 10,
+    padding: "9px 11px",
+  },
+
+  accHead: {
+    width: "100%",
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 10,
+    padding: "15px 16px",
+    background: "#fff",
+    border: "none",
+    cursor: "pointer",
+    textAlign: "left",
+  },
+  accTitle: { fontSize: 14.5, fontWeight: 700, color: C.ink, display: "block" },
+  accSub: { fontSize: 12, color: C.sub, display: "block", marginTop: 2 },
+  accChev: { fontSize: 18, color: C.sub, transition: "transform .2s ease", lineHeight: 1 },
+  accBody: { padding: "2px 16px 16px" },
+
+  goldCalc: {
+    marginTop: 14,
+    background: "rgba(212,162,76,.10)",
+    border: "1px solid rgba(212,162,76,.38)",
+    borderRadius: 12,
+    padding: "12px 13px",
+  },
+  goldCalcLabel: {
+    fontSize: 10.5,
+    letterSpacing: 1.2,
+    fontWeight: 700,
+    color: "#8A6517",
+    textTransform: "uppercase",
+    marginBottom: 9,
+  },
+  goldCalcRow: { display: "flex", alignItems: "center", gap: 9 },
+  goldCalcOut: {
+    marginTop: 10,
+    fontSize: 15,
+    color: C.ink,
+    fontVariantNumeric: "tabular-nums",
+  },
+  goldCalcWarn: { marginTop: 7, fontSize: 11.5, color: C.warn, lineHeight: 1.45 },
+  ul: { margin: 0, paddingLeft: 0, listStyle: "none", display: "flex", flexDirection: "column", gap: 10 },
+  li: {
+    fontSize: 13,
+    lineHeight: 1.55,
+    color: C.ink,
+    paddingLeft: 12,
+    borderLeft: `2px solid ${C.line}`,
+  },
+
+  readout: {
+    position: "relative",
+    overflow: "hidden",
+    background: C.graphite,
+    borderRadius: 20,
+    padding: "22px 18px 18px",
+    color: "#fff",
+    boxShadow: "0 10px 30px rgba(20,22,27,.35)",
+  },
+  readGlow: {
+    position: "absolute",
+    top: -90,
+    right: -40,
+    width: 220,
+    height: 220,
+    background: "radial-gradient(circle, rgba(212,162,76,.22), transparent 70%)",
+    pointerEvents: "none",
+  },
+  readLabel: { fontSize: 11, letterSpacing: 2.4, color: "rgba(255,255,255,.55)", fontWeight: 600 },
+  bigNum: {
+    fontFamily: "ui-monospace, 'SF Mono', Menlo, monospace",
+    fontSize: 64,
+    lineHeight: 1,
+    fontWeight: 700,
+    margin: "6px 0 4px",
+    color: C.gold,
+    letterSpacing: -2,
+    fontVariantNumeric: "tabular-nums",
+  },
+  bigUnit: { fontSize: 22, color: "rgba(255,255,255,.7)", fontWeight: 500, letterSpacing: 0 },
+  readRow: { display: "flex", alignItems: "center", marginTop: 12 },
+  readCell: { flex: 1, textAlign: "center" },
+  readSep: { width: 1, alignSelf: "stretch", background: "rgba(255,255,255,.12)" },
+  readCellV: {
+    fontFamily: "ui-monospace, 'SF Mono', Menlo, monospace",
+    fontSize: 26,
+    fontWeight: 700,
+    fontVariantNumeric: "tabular-nums",
+  },
+  readCellK: { fontSize: 11, color: "rgba(255,255,255,.55)", marginTop: 3 },
+  ecart: {
+    marginTop: 14,
+    fontSize: 13,
+    fontWeight: 600,
+    border: "1px solid",
+    borderRadius: 10,
+    padding: "8px 11px",
+    background: "rgba(255,255,255,.04)",
+  },
+  ecartSub: { color: "rgba(255,255,255,.45)", fontWeight: 400, fontSize: 12 },
+  alert: {
+    marginTop: 12,
+    fontSize: 12.5,
+    color: "#FFD9A0",
+    background: "rgba(199,122,14,.18)",
+    border: "1px solid rgba(212,162,76,.4)",
+    borderRadius: 10,
+    padding: "8px 11px",
+    lineHeight: 1.4,
+  },
+
+  doseHead: { display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 },
+  stepper: { display: "flex", alignItems: "center", gap: 6 },
+  stepBtn: {
+    width: 32,
+    height: 32,
+    borderRadius: 9,
+    border: `1px solid ${C.line}`,
+    background: "#fff",
+    fontSize: 19,
+    lineHeight: 1,
+    cursor: "pointer",
+    color: C.ink,
+    fontWeight: 600,
+  },
+  doseInput: {
+    width: 62,
+    textAlign: "center",
+    fontSize: 17,
+    fontWeight: 700,
+    border: `1px solid ${C.line}`,
+    borderRadius: 9,
+    padding: "6px 4px",
+    color: C.ink,
+    fontVariantNumeric: "tabular-nums",
+    background: "#fff",
+  },
+  mgTag: { fontSize: 13, color: C.sub, marginLeft: -2 },
+
+  ticks: {
+    display: "flex",
+    justifyContent: "space-between",
+    fontSize: 10.5,
+    color: C.sub,
+    marginTop: 7,
+    fontVariantNumeric: "tabular-nums",
+  },
+  presetRow: { display: "flex", flexWrap: "wrap", gap: 7, marginTop: 14, alignItems: "center" },
+  presetDiv: { width: 1, height: 20, background: C.line, margin: "0 2px" },
+
+  yieldRow: { display: "flex", justifyContent: "space-between", alignItems: "flex-end", gap: 12 },
+  costRow: {
+    display: "flex",
+    alignItems: "center",
+    gap: 10,
+    marginTop: 14,
+    paddingTop: 13,
+    borderTop: `1px solid ${C.line}`,
+    flexWrap: "wrap",
+  },
+  costLabel: { fontSize: 12.5, color: C.sub },
+  costOut: { fontSize: 13.5, color: C.ink },
+
+  equiv: {
+    marginTop: 16,
+    background: "linear-gradient(180deg,#F4F3FE,#EEEDFC)",
+    border: "1px solid rgba(88,86,214,.22)",
+    borderRadius: 14,
+    padding: "13px 15px 14px",
+  },
+  equivTop: { fontSize: 10.5, letterSpacing: 1.4, fontWeight: 700, color: C.indigo },
+  equivBig: {
+    fontFamily: "ui-monospace, 'SF Mono', Menlo, monospace",
+    fontSize: 38,
+    fontWeight: 700,
+    color: C.graphite,
+    letterSpacing: -1,
+    margin: "5px 0 2px",
+    fontVariantNumeric: "tabular-nums",
+  },
+  equivUnit: { fontSize: 15, fontWeight: 600, color: C.indigo, letterSpacing: 0 },
+  equivRow: {
+    display: "flex",
+    flexWrap: "wrap",
+    alignItems: "center",
+    gap: 7,
+    fontSize: 12.5,
+    color: C.ink,
+    marginTop: 4,
+    fontVariantNumeric: "tabular-nums",
+  },
+  equivDot: { color: C.sub },
+  equivNote: {
+    fontSize: 12,
+    color: C.sub,
+    marginTop: 9,
+    paddingTop: 9,
+    borderTop: "1px solid rgba(88,86,214,.18)",
+  },
+
+  table: { borderRadius: 12, overflow: "hidden", border: `1px solid ${C.line}` },
+  trow: {
+    display: "grid",
+    gridTemplateColumns: "1fr 1fr 1fr",
+    padding: "9px 12px",
+    fontSize: 13.5,
+    fontVariantNumeric: "tabular-nums",
+    borderBottom: `1px solid ${C.line}`,
+  },
+  thead: {
+    background: "#F4F6F9",
+    fontSize: 11,
+    letterSpacing: 0.5,
+    textTransform: "uppercase",
+    color: C.sub,
+    fontWeight: 700,
+  },
+  note: { fontSize: 11.5, color: C.sub, marginTop: 9, marginBottom: 0, lineHeight: 1.4 },
+
+  fracRow: { display: "grid", gridTemplateColumns: "repeat(4,1fr)", gap: 8 },
+  fracCell: {
+    background: "#F6F7FA",
+    border: `1px solid ${C.line}`,
+    borderRadius: 12,
+    padding: "11px 6px",
+    textAlign: "center",
+  },
+  fracClicks: {
+    fontFamily: "ui-monospace, 'SF Mono', Menlo, monospace",
+    fontSize: 24,
+    fontWeight: 700,
+    color: C.indigo,
+    lineHeight: 1,
+  },
+  fracClicksLab: { fontSize: 10, color: C.sub, marginTop: 2 },
+  fracMl: { fontSize: 11.5, color: C.ink, marginTop: 6, fontVariantNumeric: "tabular-nums" },
+  fracName: { fontSize: 10.5, color: C.sub, marginTop: 5, lineHeight: 1.3 },
+
+  links: { display: "flex", flexDirection: "column", gap: 8, marginTop: 14 },
+  link: {
+    fontSize: 12.5,
+    color: C.indigo,
+    textDecoration: "none",
+    fontWeight: 600,
+    background: "rgba(88,86,214,.07)",
+    border: "1px solid rgba(88,86,214,.22)",
+    borderRadius: 10,
+    padding: "9px 11px",
+    lineHeight: 1.35,
+  },
+
+  footer: { fontSize: 11.5, color: C.sub, lineHeight: 1.55, padding: "2px 6px 0", textAlign: "center" },
+};
+
+const css = `
+.penBtn:active{transform:scale(.96)}
+.stepBtn:active{transform:scale(.92);background:#F4F6F9}
+.accBtn:active{background:#F7F8FA}
+.chip:active{transform:scale(.95)}
+.doseInput:focus{outline:none;border-color:${C.indigo};box-shadow:0 0 0 3px rgba(88,86,214,.15)}
+.slider{
+  -webkit-appearance:none;appearance:none;width:100%;height:6px;border-radius:6px;margin:6px 0 0;
+  background:linear-gradient(90deg,${C.indigo} 0%,${C.indigo} var(--f,20%),#DBE0E7 var(--f,20%),#DBE0E7 100%);
+  cursor:pointer;
+}
+.slider::-webkit-slider-thumb{
+  -webkit-appearance:none;appearance:none;width:26px;height:26px;border-radius:50%;
+  background:#fff;border:3px solid ${C.indigo};box-shadow:0 2px 8px rgba(88,86,214,.4);cursor:grab;
+}
+.slider::-webkit-slider-thumb:active{cursor:grabbing;transform:scale(1.08)}
+.slider::-moz-range-thumb{
+  width:24px;height:24px;border-radius:50%;background:#fff;border:3px solid ${C.indigo};
+  box-shadow:0 2px 8px rgba(88,86,214,.4);cursor:grab;
+}
+.slider::-moz-range-progress{background:${C.indigo};height:6px;border-radius:6px}
+.slider::-moz-range-track{background:#DBE0E7;height:6px;border-radius:6px}
+@media (prefers-reduced-motion: reduce){*{transition:none!important}}
+`;
+
+ReactDOM.createRoot(document.getElementById("root")).render(<App />);
+</script>
+</body>
+</html>
